@@ -1,0 +1,269 @@
+<?php 
+
+/**
+ * Implementation of hook_perm().
+ */
+function click2call_user_perm() {
+  return array('include click2call in user profile', 'access click2call in user profiles');
+}
+/**
+ * Implementation of hook_user().
+ * 
+ * Add Call Me to core user profile
+ */
+function click2call_user_user($op, &$edit, &$account, $category = NULL) {
+  if ($op == 'form' && $category == 'account' && user_access('include click2call in user profile', $account)) {     
+    return _click2call_user_user_form($edit);
+  }
+  elseif ($op == 'view' && user_access('include click2call in user profile', $account) && user_access('access click2call in user profiles')) {
+    $account->content['click2call_user'] = array(
+      '#type' => 'user_profile_item',
+      '#title' => t('Call Me'),
+      '#value' => _click2call_user_user_view($account),
+    );
+  }
+}
+
+function _click2call_user_user_form($edit) {
+  $scripts[0] = '-none-';
+  $scripts = array_merge($scripts, VoipScript::getScriptNames());
+    
+  $form['click2call'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Click2Call settings'),
+    '#collapsible'  => TRUE,
+    '#collapsed'    => FALSE,
+  );
+  $form['click2call']['click2call_user_script'] = array(
+    '#type' => 'select',
+    '#title' => t('Click2Call script'),
+    '#default_value' => $edit['click2call_user_script'],
+    '#options' => $scripts,
+    '#required' => TRUE,
+  );
+  $form['click2call']['click2call_user_script_desc'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Click2Call field description'),
+    '#description' => t('Text inviting users to click on the field. Examples might include: "click here to leave me a message", "click here to hear my latest recordings", etc.'),
+    '#default_value' => $edit['click2call_user_script_desc'],
+  );
+    
+  return $form;
+}
+
+function _click2call_user_user_view($account) {
+  if (empty($account->click2call_user_script)) {
+    return t("User did not enable Click2Call option.");
+  }
+  
+  drupal_add_js(drupal_get_path('module', 'click2call') . '/js/click2call.js');
+  drupal_add_css(drupal_get_path('module', 'click2call') . '/css/click2call.css');
+  
+  $field_name='user';
+  $delta=$account->uid; //Delta is uid of callee
+  $script_desc=$account->click2call_user_script_desc;
+  
+  if (empty($script_desc)) {
+    $script_desc=t('Click here to call');
+  }
+  
+  $output='<a href="javascript:void(0)" onclick="click2call_display(\'' . $field_name . '\',\'' . $delta . '\');" class="click2call-link">' . $script_desc . '</a>';
+  $output .= '<div id="click2call-group-' . $field_name . '-' . $delta . '" class="click2call-hidden">';
+  //Hidden div to store the phone list
+  $output .= '<div id="click2call-' . $field_name . '-' . $delta . '-hidden" class="click2call-hidden"></div>';
+  //Hidden div to store the call status in case of error
+  $output .= '<div id="click2call-' . $field_name . '-' . $delta . '-status"></div>';
+  //Hidden input to store the call nid.
+  $output .= '<input type="hidden" value="" id="click2call-' . $field_name . '-' . $delta . '-callnid"/>';
+  $output .= theme('click2call_phone_numbers', $field_name, $delta, '');
+  //Call/Remove button
+  $output .= '<input id="click2call-button-' . $field_name . '-' . $delta . '"type="button" value="Call Me" onclick="click2call_call(\'' . $field_name . '\',' . $delta . ',\'\')" />';
+  
+  //Hangup button
+  $output .= '<input class="click2call-hangup-button" id="click2call-hangup-button-' . $field_name . '-' . $delta . '"type="button" value="' . t('Hangup') . '" onclick="click2call_hangup(\'' . $field_name . '\',' . $delta . ')" />';
+  $output .= '</div>';
+  return $output;
+}
+
+/**
+ * Implementation of hook_views_api().
+ */
+function click2call_user_views_api() {
+  return array(
+    'api' => 2,
+    'path' => drupal_get_path('module', 'click2call_user') . '/views',
+  );
+}
+
+/**
+ * Implementation of hook_voipscript_get_script_names()
+ */
+function click2call_user_voipscript_get_script_names() {
+  $script_names[] = 'click2call_answering_machine';
+  $script_names[] = 'click2call_call_forwarding';
+  return $script_names;
+}
+
+/**
+ * Implementation of hook_voipcall_load_script()
+ */
+function click2call_user_voipscript_load_script($script_name, $vars = NULL) {
+  $script = NULL;
+  switch ($script_name) {
+    case 'click2call_answering_machine': 
+      $script = new VoipScript('click2call_answering_machine');
+
+      $script->addLabel('start');
+      //TODO: Should we add greeting by profile owners?
+      $prompt = t("Please leave your message after the beep.  When done, press the pound key.");
+      $timeout = 5;
+      $end_key = '#';
+      $max_length = 20;
+      $script->addRecord($prompt, $timeout, $end_key, $max_length);
+
+      $script->addSay('You said %recording_public_url');
+    
+      $script->addLabel('accept menu');
+      $text = "To accept, press 1.  To record it once again, press 2. To hangup, press the pound key.";
+      $timeout = 5;
+      $end_key = '';
+      $num_digits = 1;
+      $script->addGetInput($text, $num_digits, $end_key, $timeout);
+
+      $script->addGotoIf('accept recording', "^%input_digits == '1'");
+
+      $script->addGotoIf('start', "^%input_digits == '2'");
+
+      $script->addGotoIf('end call', "^%input_digits == '#'");
+
+      $script->addSay('Invalid input received. Please try again.');
+      $script->addGoto('accept menu');
+
+      $script->addLabel('accept recording');
+      $script->addSay('About to start processing the recorded file.');
+      // Process the recording.
+      $script->addSet('callback_result',
+        '^_click2call_user_answering_machine_callback(%call_id, %recording_public_url, %recording_duration)');
+
+      $script->addSay('The callback returned: %callback_result');
+      $script->addGoto('end call');
+
+      $script->addLabel('no input received');
+      $script->addSay("No input received. Please try again.");
+      $script->addGoto('start');
+
+      $script->addLabel('end call');
+      $script->addSay('Bye bye.');
+      $script->addHangup();
+
+    break;
+
+    case 'click2call_call_forwarding':
+      $script = new VoipScript('click2call_call_forwarding');
+      $script->addLabel('start');
+      $profile_owner = user_load($vars['caller_uid']);
+      if (empty($profile_owner->voipnumber_phone)) {
+        $script->addSay("The user you are trying to call does not have a valid phone number."); 
+        $script->addHangup();
+      }
+      else {
+        $script->addSay('Please wait. We are connecting you with ' . $profile_owner->name); 
+        $number = $profile_owner->voipnumber_country . $profile_owner->voipnumber_area . $profile_owner->voipnumber_phone;
+        $type='click2call';
+        $script->addDial($number);
+        $script->addSet('callback_result','^_click2call_call_forward_callback(%dial_status)');
+        $script->addSay('%callback_result');
+        $script->addHangup();
+      }
+      
+    break;
+  }
+
+  return $script;
+}
+
+/**
+ * Callback for the voip script phonerecorderfield_default.
+ * 
+ * @see hook_voipscript_load_script()
+ */
+function _click2call_user_answering_machine_callback($call_id, $recording_url, $recording_duration) {
+  $call = new VoipCall();
+  $call_nid=$call->getCidFromCallId($call_id);
+  $call= VoipCall::load($call_nid);
+
+  //TODO: Should we insert this information in table?
+  /*$sql = "INSERT INTO {phonerecorderfield_recording} (call_nid, url, uid, name, number, duration) " 
+          ."VALUES ('$call_nid', '$recording_url', %d, '%s', '%s', %d) ";
+  $args = array($uid, $name, $number, $recording_duration);
+  $res=db_query($sql, $args);*/
+
+  // Log call blast with watchdog
+  $type = 'click2call';
+  $log_message = t("New message recorded. Call_id: $call_id, recording_url: $recording_url, recording_duration: $recording_duration, name: $name, number: $number");
+  watchdog($type, $log_message);
+
+  $profile_owner_name = $call->getCallerName();
+  $dest_name = $call->getDestName();
+  
+  $profile_owner = user_load(array('name' => $profile_owner_name));
+  
+/**** 
+// TODO: Implement hook with Messaging Framework as below?
+
+  //Messaging API:
+  $account = messaging_load_user($profile_owner->uid);
+  $message->subject = t('New voice message');
+  $message->body[0] = t("You have a new voice message from @name. You can listen to it @link", array('@name' => $dest_name, '@link'=>$recording_url));
+  $res=messaging_message_send_user($account, $message);
+***/
+  
+  $params = array(
+    'name' => $dest_name,
+    'url' => $recording_url,
+  );
+  
+  $email=$profile_owner->mail;
+  $mail=drupal_mail('click2call_user', 'answering_machine', $email, language_default(), $params);
+
+  if ($mail['result']) {
+    return 'Success.';
+  }
+  else {
+    return 'Failure';
+  }
+}
+
+function _click2call_call_forward_callback($dial_status){
+  switch ($dial_status) {
+    case VoipScript::DIAL_COMPLETED:
+	$status_message ='';
+    break;
+    case VoipScript::DIAL_BUSY:
+      $status_message = 'Dialed number is busy. Try again later';
+    break;
+    case VoipScript::DIAL_NO_ANSWER:
+      $status_message = 'Dialed number didn\'t answer. Try again later';
+    break;
+    case VoipScript::DIAL_FAILED:
+      $status_message = 'Call failed. Try again later';
+    break;
+    default:
+      $status_message = 'Call error. Try again later';
+    break;
+  }
+  
+  return $status_message;
+}
+
+/**
+ * Implementation of hook_mail
+ */
+function click2call_user_mail($key, &$message, $params) {
+ switch ($key) {
+   case 'answering_machine':   
+     $message['subject'] = t('New Voicemail');
+     $message['body'] = t("You have a new voicemail from @name. You can listen to it @link", array('@name' => $params['name'], '@link' =>  $params['url']));
+   break;   
+  }
+}

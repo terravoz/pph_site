@@ -1,0 +1,267 @@
+<?php
+
+/**
+ * Implementation of hook_perm().
+ */
+function click2call_cck_perm() {
+  return array('access click2call fields');
+}
+
+/*CCK Functions*/
+/**
+ * Implementation of hook_field_info().
+ */
+function click2call_cck_field_info() {
+  return array(
+    'click2call_cck' => array(
+      'label' => t('Click2Call Field'),
+      'description' => t('Click2Call CCK Field.'),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_field_settings().
+ */
+function click2call_cck_field_settings($op, $field) {
+  switch ($op) {
+    case 'form':
+      $form=_click2call_settings_fields('field_form', $field);
+      return $form;
+    
+    case 'save':
+      $settings = array('click2call_number');
+      return $settings;
+    
+    case 'database columns':
+      $columns = array(
+      'script' => array('type' => 'varchar', 'length' => 255, 'not null' => FALSE),
+      'script_description' => array('type' => 'varchar', 'length' => 255, 'not null' => FALSE),
+      );
+    return $columns;
+  }
+}
+
+/**
+ * Implementation of hook_content_is_empty().
+ */
+function click2call_cck_content_is_empty($item, $field) {
+  if (empty($item['script'])) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function click2call_cck_theme() {
+  return array(
+    'click2call_cck_widget' => array(
+      'arguments' => array('element' => NULL),
+    ),
+    'click2call_cck_formatter_default' => array(
+      'arguments' => array('element' => NULL),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_field_formatter_info().
+ */
+function click2call_cck_field_formatter_info() {
+  return array(
+    'default' => array(
+      'label' => t('Click2Call Button'),
+      'field types' => array('click2call_cck'),
+      'multiple values' => CONTENT_HANDLE_CORE,
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_field_formatter().
+ *
+ * Prepare an individual item for viewing in a browser.
+ *
+ * @param $field
+ *   The field the action is being performed on.
+ * @param $item
+ *   An array, keyed by column, of the data stored for this item in this field.
+ * @param $formatter
+ *   The name of the formatter being used to display the field.
+ * @param $node
+ *   The node object, for context. Will be NULL in some cases.
+ *   Warning: when displaying field retrieved by Views, $node will not
+ *   be a "full-fledged" node object, but an object containg the data returned
+ *   by the Views query (at least nid, vid, changed)
+ * @return
+ *   An HTML string containing the formatted item.
+ *
+ * In a multiple-value field scenario, this function will be called once per
+ * value currently stored in the field. This function is also used as the handler
+ * for viewing a field in a views.module tabular listing.
+ *
+ * It is important that this function at the minimum perform security
+ * transformations such as running check_plain() or check_markup().
+ */
+function click2call_cck_field_formatter($field, $item, $formatter, $node) {
+  if (!isset($item['script'])) {
+    return '';
+  }
+  $text = check_plain($item['script']);
+  return $text;
+}
+
+/**
+ * FAPI theme for an individual text elements.
+ *
+ * The textfield or textarea is already rendered by the
+ * textfield or textarea themes and the html output
+ * lives in $element['#children']. Override this theme to
+ * make custom changes to the output.
+ *
+ * $element['#field_name'] contains the field name
+ * $element['#delta]  is the position of this element in the group
+ */
+ 
+function theme_click2call_cck_widget($element) {
+  drupal_add_css(drupal_get_path('module', 'click2call') .'/css/click2call.css');
+  $output = '';
+  $output .= '<div class="click2call_cck-subrow clear-block">';
+  $output .= '<div class="click2call-script click2call_cck-column">'. theme($element['script']['#type'], $element['script']) .'</div>';
+  $output .= '<div class="click2call-desc click2call_cck-column">'. theme('textfield', $element['script_description']) .'</div>';
+  $output .= '</div>';
+ 
+  return $output;
+}
+
+/**
+ * Theme function for 'default' field formatter.
+ */
+function theme_click2call_cck_formatter_default($element) {
+  
+  if (!user_access('access click2call fields')) {
+    return '';
+  }
+  if (!$element['#item']['script']) {
+    return '';
+  }
+  
+  drupal_add_js(drupal_get_path('module', 'click2call') . '/js/click2call.js');
+  drupal_add_css(drupal_get_path('module', 'click2call') . '/css/click2call.css');
+  
+  $field_name=$element['#field_name'];
+  $delta=$element['#item']['#delta'];
+  $script_desc=$element['#item']['script_description'];
+  
+  if (empty($script_desc)) {
+    //TODO: Change to something more meaningful
+    $script_desc=t('Click here to call');
+  }
+  
+  $output='<a href="javascript:void(0)" onclick="click2call_display(\'' . $field_name . '\',\'' . $delta . '\');" class="click2call-link">' . $script_desc . '</a>';
+  $output .= '<div id="click2call-group-' . $field_name . '-' . $delta . '" class="click2call-hidden">';
+  //Hidden div to store the phone list
+  $output .= '<div id="click2call-' . $field_name . '-' . $delta . '-hidden" class="click2call-hidden"></div>';
+  //Hidden div to store the call status in case of error
+  $output .= '<div id="click2call-' . $field_name . '-' . $delta . '-status"></div>';
+  //Hidden input to store the call nid.
+  $output .= '<input type="hidden" value="" id="click2call-' . $field_name . '-' . $delta . '-callnid"/>';
+  $output .= theme('click2call_phone_numbers', $field_name, $delta, $element['#node']->type);
+  //Call/Remove button
+  $output .= '<input id="click2call-button-' . $field_name . '-' . $delta . '"type="button" value="Call Me" onclick="click2call_call(\'' . $field_name . '\',' . $delta . ',\'' . $element['#node']->nid . '\')" />';
+  
+  //Hangup button
+  $output .= '<input class="click2call-hangup-button" id="click2call-hangup-button-' . $field_name . '-' . $delta . '"type="button" value="' . t('Hangup') . '" onclick="click2call_hangup(\'' . $field_name . '\',' . $delta . ')" />';
+  $output .= '</div>';
+  return $output;
+}
+
+/**
+ * Implementation of hook_widget_info().
+**/
+function click2call_cck_widget_info() {
+  return array(
+    'click2call_cck_widget' => array(
+      'label' => t('Click2Call'),
+      'field types' => array('click2call_cck'),
+      'multiple values' => CONTENT_HANDLE_CORE,
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_widget().
+ */
+function click2call_cck_widget(&$form, &$form_state, $field, $items, $delta = 0) {
+  $element = array(
+    '#type' => $field['widget']['type'],
+    '#default_value' => isset($items[$delta]) ? $items[$delta] : '',
+    '#title' => $field['widget']['label'],
+    '#weight' => $field['widget']['weight'],
+    '#description' => $field['widget']['description'],
+    '#required' => $field['required'],
+    '#field' => $field,
+  );
+  return $element;
+}
+
+
+/**
+ * Implementation of FAPI hook_elements().
+ *
+ * Any FAPI callbacks needed for individual widgets can be declared here,
+ * and the element will be passed to those callbacks for processing.
+ *
+ * Drupal will automatically theme the element using a theme with
+ * the same name as the hook_elements key.
+ *
+ * Autocomplete_path is not used by text_widget but other widgets can use it
+ * (see nodereference and userreference).
+ */
+ function click2call_cck_elements() {
+  return array(
+    'click2call_cck_widget' => array(
+      '#input' => TRUE,
+      '#process' => array('click2call_cck_widget_process'),
+      ),
+  );
+}
+/**
+ * Process an individual element.
+ *
+ * Build the form element. When creating a form using FAPI #process,
+ * note that $element['#value'] is already set.
+ *
+ * The $fields array is in $form['#field_info'][$element['#field_name']].
+ */
+function click2call_cck_widget_process($element, $edit, $form_state, $form) {
+  $field = $form['#field_info'][$element['#field_name']];
+  $delta = $element['#delta'];
+ 
+  $field_key=$element['#columns'][0];
+ // $field_settings=content_fields($element['#field_name'], $element['#type_name']);
+  $scripts[0]='-none-';
+  $scripts=array_merge($scripts, VoipScript::getScriptNames());
+
+  $element[$field_key] = array(
+      '#type' => 'select',
+      '#title' => t('Click2Call script'),
+      '#default_value' => isset($element['#value'][$field_key]) ? $element['#value'][$field_key] : NULL,
+      '#options' => $scripts,
+      '#required' => $element['#required'],
+      '#attributes' => array('class' => 'script-field-select'),
+  );
+  
+  $field_key=$element['#columns'][1];
+  $element[$field_key] = array(
+      '#type' => 'textfield',
+      '#title' => t('Click2Call field description'),
+      '#default_value' => isset($element['#value'][$field_key]) ? $element['#value'][$field_key] : NULL,
+      '#description' => t('Text inviting users to click on the field. Examples might include: "click here to connect with our sales department", "click here to get the weather report for your location", etc.'),
+      '#required' => $element['#required'],
+  );
+  
+  return $element;
+}

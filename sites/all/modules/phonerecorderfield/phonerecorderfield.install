@@ -1,0 +1,92 @@
+<?php
+/**
+ * Implementation of hook_install().
+ */
+function phonerecorderfield_install() {
+  drupal_load('module', 'content');
+  content_notify('install', 'phonerecorderfield');
+   drupal_install_schema('phonerecorderfield');
+
+}
+
+function phonerecorderfield_uninstall() {
+  drupal_load('module', 'content');
+  content_notify('uninstall', 'phonerecorderfield');
+  drupal_uninstall_schema('phonerecorderfield');
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function phonerecorderfield_schema() {
+ 
+  /**
+   * phonerecorderfield_recording table
+   * 
+   * This table keeps track of recorded messages
+   * to be attached to callblasts as blast messages.
+   */
+  $schema['phonerecorderfield_recording'] = array(
+    'fields' => array(
+       'cid' => array(
+        'description' => t('CID'),
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      // nid of voipcall.
+      'call_nid' => array(
+        'type' => 'varchar',  
+        'length' => 255,      // todo how long can these unique ids be? 
+        'not null' => TRUE, 
+        'default' => ''
+      ),
+      // uid of user who recorded the recording
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+       'fid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+      // TODO Make these unique? Add validation to confirm user wants to delete/replace an existing message with the same name.
+      // recording name
+      'name' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => TRUE, 
+        'default' => ''
+      ),
+      // number where recording was recorded 
+      'number' => array(
+        'type' => 'varchar', 
+        'length' => 15, 
+        'not null' => TRUE, 
+        'default' => ''
+      ),
+      // url where recording is stored 
+      'url' => array(
+        'type' => 'varchar', 
+        'length' => 255, 
+        'not null' => TRUE, 
+        'default' => ''
+      ),
+      // url where recording is stored 
+      'duration' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'default' => 0,
+        'not null' => TRUE,
+      ),
+    ), 
+    'primary key' => array('cid'),
+  );
+
+  return $schema;
+}
+

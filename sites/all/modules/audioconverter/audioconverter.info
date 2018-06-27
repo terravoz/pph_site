@@ -1,0 +1,14 @@
+; $Id: 
+name = Audio Converter
+description = Adds the ability to convert audio files to mp3.
+core = 6.x
+package = Audio
+
+
+
+; Information added by drupal.org packaging script on 2011-03-01
+version = "6.x-1.0-beta1"
+core = "6.x"
+project = "audioconverter"
+datestamp = "1299010567"
+

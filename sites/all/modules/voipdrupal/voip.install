@@ -1,0 +1,9 @@
+<?php
+/**
+ * Implementation of hook_install().
+ */
+
+function voip_uninstall() {
+  //Delete module variables
+  db_query("DELETE FROM {variable} WHERE name LIKE 'voipserver_%%'");
+}

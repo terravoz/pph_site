@@ -1,0 +1,12 @@
+; $Id$
+name = VoIP Phone Phono client
+description = Integrates Drupal VoIP with Phono service.
+package = VoIP Drupal
+dependencies[] = voipphone
+core = 6.x
+; Information added by drupal.org packaging script on 2012-04-11
+version = "6.x-1.0-beta3"
+core = "6.x"
+project = "voipphone"
+datestamp = "1334156173"
+

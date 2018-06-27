@@ -1,0 +1,12 @@
+; $Id$
+name = VoIP Phone Twilio Client
+description = Integrates Drupal VoIP with Twilio VoIP client for browser.
+package = VoIP Drupal
+dependencies[] = voipphone
+core = 6.x
+; Information added by drupal.org packaging script on 2012-04-11
+version = "6.x-1.0-beta3"
+core = "6.x"
+project = "voipphone"
+datestamp = "1334156173"
+

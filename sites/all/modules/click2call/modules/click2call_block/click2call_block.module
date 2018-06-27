@@ -1,0 +1,109 @@
+<?php
+/**
+ * Implementation of hook_form_alter().
+ */
+function click2call_block_form_alter(&$form, &$form_state, $form_id) {
+  if ($form_id=='click2call_admin_settings_form') {
+    $form['click2call_block'] = array(
+      '#type'         => 'fieldset',
+      '#title'        => t('Block settings'),
+      '#collapsible'  => TRUE,
+      '#collapsed'    => FALSE,
+      '#weight' => 0,
+    );
+    $form['click2call_block']['click2call_block_number'] = array(
+      '#title' => t('Number of blocks'),
+      '#type' => 'textfield',
+      '#description' => t('The desired number of Click2Call blocks to be made available in the system. Enter a number between 0 and 99. If you set this to 0, you will get no Click2Call blocks.'),
+      '#default_value' => variable_get('click2call_block_number', '2'),
+      '#size' => 2,
+      
+    );
+  }
+}
+
+/**
+ * Implementation of hook_block()
+ */
+function click2call_block_block($op = 'list', $delta = 0, $edit = array()) {
+  // listing of blocks, such as on the admin/block page
+  if ($op == "list") {
+    for ($i = 1; $i <= variable_get('click2call_block_number', '2'); $i++) {
+      $blocks[$i]['info'] = variable_get('click2call_block_script_desc_'. $i, 'Click2Call '. $i) .' (Click2Call)';
+    }
+      return $blocks;
+  }
+  elseif ($op == 'configure') {
+    $scripts[0] = '-none-';
+    $scripts = array_merge($scripts, VoipScript::getScriptNames());
+    
+    $form['click2call'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Click2Call settings'),
+      '#collapsible'  => TRUE,
+      '#collapsed'    => FALSE,
+    );
+    $form['click2call']['click2call_block_script'] = array(
+      '#type' => 'select',
+      '#title' => t('Click2Call script'),
+      '#default_value' => variable_get('click2call_block_script_' . $delta, 0),
+      '#options' => $scripts,
+      '#required' => TRUE,
+    );
+    $form['click2call']['click2call_block_script_description'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Click2Call field description'),
+      '#default_value' => variable_get('click2call_block_script_desc_' . $delta, t('Click here to call')),
+      '#description' => t('Text inviting users to click on the field. Examples might include: "click here to connect with our sales department", "click here to get the weather report for your location", etc.'),
+    );
+    return $form;
+  }
+  elseif ($op == 'save') {
+    variable_set('click2call_block_script_' . $delta, $edit['click2call_block_script']);
+    variable_set('click2call_block_script_desc_' . $delta, $edit['click2call_block_script_description']);
+  }
+  elseif ($op == 'view') {
+    $block = array(
+      'subject' => variable_get('click2call_block_script_desc_' . $delta, t('Click here to call')), 
+      'content' => click2call_block_content($delta),
+    );
+
+   
+    return $block;
+  }
+}
+
+function click2call_block_content($delta) {
+  $script_name=variable_get('click2call_block_script_' . $delta, 0);
+  if (empty($script_name)) {
+    //No script name, display message
+    return t("The Click2Call block is not configured. You must select a VoIP Drupal script from ") . l("block settings", "admin/build/block/configure/click2call/" . $delta);
+  }
+  drupal_add_js(drupal_get_path('module', 'click2call') . '/js/click2call.js');
+  drupal_add_css(drupal_get_path('module', 'click2call') . '/css/click2call.css');
+  
+  $field_name='block';
+  $script_desc=variable_get('click2call_block_script_desc_' . $delta, t('Click here to call'));
+  
+  if (empty($script_desc)) {
+    //TODO: Change to something more meaningful
+    $script_desc=t('Click here to call');
+  }
+  
+  $output='<a href="javascript:void(0)" onclick="click2call_display(\'' . $field_name . '\',\'' . $delta . '\');" class="click2call-link">' . $script_desc . '</a>';
+  $output .= '<div id="click2call-group-' . $field_name . '-' . $delta . '" class="click2call-hidden">';
+  //Hidden div to store the phone list
+  $output .= '<div id="click2call-' . $field_name . '-' . $delta . '-hidden" class="click2call-hidden"></div>';
+  //Hidden div to store the call status in case of error
+  $output .= '<div id="click2call-' . $field_name . '-' . $delta . '-status"></div>';
+  //Hidden input to store the call nid.
+  $output .= '<input type="hidden" value="" id="click2call-' . $field_name . '-' . $delta . '-callnid"/>';
+  $output .= theme('click2call_phone_numbers', $field_name, $delta, '');
+  //Call/Remove button
+  $output .= '<input id="click2call-button-' . $field_name . '-' . $delta . '"type="button" value="Call Me" onclick="click2call_call(\'' . $field_name . '\',' . $delta . ',\'\')" />';
+  
+  //Hangup button
+  $output .= '<input class="click2call-hangup-button" id="click2call-hangup-button-' . $field_name . '-' . $delta . '"type="button" value="' . t('Hangup') . '" onclick="click2call_hangup(\'' . $field_name . '\',' . $delta . ')" />';
+  $output .= '</div>';
+  return $output;
+}

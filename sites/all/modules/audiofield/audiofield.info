@@ -1,0 +1,15 @@
+; $Id: 
+name = AudioField
+description = "Adds audio widget for uploading and playing audio files."
+core = 6.x
+dependencies[] = filefield
+package = CCK
+
+
+
+; Information added by drupal.org packaging script on 2012-06-12
+version = "6.x-1.2"
+core = "6.x"
+project = "audiofield"
+datestamp = "1339490473"
+

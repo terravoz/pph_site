@@ -1,0 +1,278 @@
+<?php
+
+/**
+ * Implementation of hook_menu().
+ */
+function click2call_menu() {
+  $items['admin/settings/click2call'] = array(
+    'title' => 'Click2Call',
+    'description' => 'Click2Call settings.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('click2call_admin_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  
+  $items['click2call/call'] = array(
+    'title' => 'Call',
+    'description' => '',
+    'page callback' => 'click2call_call',
+    'type' => MENU_CALLBACK,
+    'access callback' => TRUE,
+  );
+   
+  $items['click2call/get/status'] = array(
+    'title' => 'Get Call Status',
+    'description' => '',
+    'page callback' => 'click2call_get_status',
+    'type' => MENU_CALLBACK,
+    'access callback' => TRUE,
+  );
+   
+  $items['click2call/hangup'] = array(
+    'title' => 'Hangup',
+    'description' => '',
+    'page callback' => 'click2call_hangup',
+    'type' => MENU_CALLBACK,
+    'access callback' => TRUE,
+  );
+  
+  return $items;
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function click2call_theme() {
+  return array(
+    'click2call_phone_numbers' => array(
+      'arguments' => array('field_name' => NULL, 'delta' => 0, 'node_type' => NULL),
+    ),
+  );
+}
+
+function click2call_admin_settings_form(&$form_state) { 
+  $form = _click2call_settings_fields();
+  return system_settings_form($form);
+} 
+
+function _click2call_settings_fields($type='admin_form', $settings=NULL) {
+  $options=array();
+  $prefix='';
+  /*Set stored values, they can come from admin form or from field form*/
+  if ($type=='field_form') {
+    $click2call_number=!empty($settings['click2call_number']) ? $settings['click2call_number'] : variable_get('click2call_number', array('type'));
+  }
+  elseif ($type=='admin_form') {
+    $click2call_number=variable_get('click2call_number', array('type'));
+  }
+    
+  $description = t('Select the options that Click2Call will make available for users to determine the number to be called');
+
+  if (module_exists('voipnumber')) {
+    //This options are available only if voipnumber is enabled
+    $options['default'] = t("Present the default number associated with the user");
+    $options['voipnumber']=t("Present a list with the different numbers associated with the user");
+  }
+  else {
+    $description .= ' ' . t('Enable !voipnumber module to get more options.', array('!voipnumber' => l('voipnumber', 'http://drupal.org/project/voipnumber')));
+  }
+    
+  $options['type']=t('Ask user to type the number in');
+    
+  $form['click2call_number'] = array(
+    '#type' => 'checkboxes',
+    '#prefix' => $prefix,
+    '#title' => t('Default number to be called'),
+    '#options' => $options,
+    '#default_value' => $click2call_number,
+    '#description' => $description,
+  );
+
+  return $form;
+}
+
+/**
+ * AJAX Callback
+ * Calls the user on his phone using the VoIP Drupal module
+ */ 
+function click2call_call() {
+  global $user;
+
+  if (empty($_GET['phone']) || empty($_GET['field_name'])) {
+    return;
+  }
+  
+  switch ($_GET['field_name']) {
+    case 'block':
+      //Blocks
+      $caller_uid=1;
+      $name = variable_get('click2call_block_script_desc_' . $_GET['delta'], t('Click here to call'));
+      $script_name = variable_get('click2call_block_script_' . $_GET['delta'], 0);
+      $caller_name=t('Click2Call Block ' . $_GET['delta']);
+      break;
+    
+    case 'user':
+      //User profile
+      //Permission checking
+      if (!user_access('access click2call in user profiles')) {
+        return;
+      }
+      $caller_uid = $_GET['delta'];
+      $caller = user_load($caller_uid);
+      $name = $caller->click2call_user_script_desc;
+      $script_name = $caller->click2call_user_script;
+      $caller_name = $caller->name;
+      break;
+    
+    default:
+      //CCK field
+      //Permission checking
+      if (!user_access('access click2call fields')) {
+        return;
+      }
+      $click2call_node = node_load($_GET['nid']);
+      $name=$click2call_node->{$_GET['field_name']}[$_GET['delta']]['script_description'];
+      $script_name = $click2call_node->{$_GET['field_name']}[$_GET['delta']]['script'];
+      $caller_uid = $click2call_node->uid;
+      $caller = user_load($caller_uid);
+      $caller_name = $caller->name;
+      break;
+  }
+  
+  $number=$_GET['phone']; 
+  $vars = array('uid' => $user->uid, 'name' => $name, 'number' => $number, 'caller_uid' => $caller_uid);
+  $script = VoipScript::loadScript($script_name, $vars);
+
+  $call = new VoipCall();
+  $call->setDestNumber($number);
+  $call->setDestName($user->name);
+  $call->setCallerName($caller_name);
+  $call->setScript($script);
+  $call->save();
+    
+  // Dial the call.
+  voip_dial($call);
+  
+  // Log call with watchdog
+  $type = 'click2call';
+  $message = t("New Click2Call message recorded by $user->name to phone $number. See voipcall nid " . $call->getCid());
+  watchdog($type, $message);
+  
+  $rc = drupal_json(array('call_nid' => $call->getCid()));
+  return $rc;
+  exit();
+}
+
+/**
+ * AJAX Callback function
+ * Returns status(true/false) and url for recording based on call_id.
+ */
+function click2call_get_status() {
+  global $user;
+	$call_nid=$_GET['call_nid'];
+	$call = VoipCall::load($call_nid);
+	//Check for status only if call is finished
+	if ($call->isHangup()==TRUE) {
+    if ($call->getCallStatus() != VoipCall::COMPLETED) {
+      if ($call->getCallStatus() == VoipCall::ERROR) {
+        $failed_message='<div class="error">' . $call->getErrorMessage() . '</div>';
+      }
+      elseif ($call->getCallStatus()=='to_hangup' || $call->getCallStatus() == VoipCall::CANCELED) {
+        //We display message for all statuses except hangup
+        $failed_message='<div class="messages status">' . $call->getCallStatusDescription() . '</div>';
+      }
+      else {
+        $failed_message='<div class="error">' . $call->getCallStatusDescription() . '</div>';
+      }
+      $rc = drupal_json(array('status' => 'failed', 'message' => $failed_message));
+      return $rc;
+      exit();
+    }
+#Else:
+    $message='<div class="messages status">' . $call->getCallStatusDescription() . '</div>';
+    $rc = drupal_json(array('status' => 'success' , 'message' => $message));
+    return $rc;
+    exit();
+  }
+  else {
+   $rc = drupal_json(array('status' => 'calling'));
+   return $rc;
+  }
+  exit();
+}
+
+/**
+ * AJAX Callback function
+ * Hangups the call and returns status (true/false).
+ */
+function click2call_hangup() {
+  $voipcall_nid = $_GET['call_nid'];
+  $call = VoipCall::load($voipcall_nid);
+  $status = voip_hangup($call);
+  $rc = drupal_json(array('status' => $status));
+  return $rc;
+  exit();
+}
+
+/*Retrieve and theme phone numbers selection*/
+function theme_click2call_phone_numbers($field_name, $delta, $content_type) {
+  global $user;
+  $field_settings=content_fields($field_name, $content_type);
+  if (empty($field_settings)) {
+    $op = variable_get('click2call_number', array('type'));
+  }
+  else {
+    $op = $field_settings['click2call_number'];
+  }  
+  foreach ($op as $key => $call_option) {
+    if ($call_option===0) {
+      unset($op[$key]);
+    }
+  }
+  $num=count($op);
+  if ($num==1 || $user->uid==0) {
+    //If only one choice is available or user is anonymous then make the option preselected
+    $checked='checked="checked"';
+  }
+  foreach ($op as $call_option) {
+    switch ($call_option) {
+      case 'default':
+        if (module_exists('voipnumber')) {
+          $phone = VoipNumber::getDefaultNumberFromUid();
+          if (empty($phone)) {      
+            if ($num==2) {
+              //If only 2 choices are available then make the other selected
+              $checked='checked="checked"';
+            }
+          }
+          else {
+            $option .= '<input type="radio" name="click2call-' . $field_name . '-' . $delta . '-phone" value="' . $phone->getNumber() . '" checked="checked"/>Default (' . $phone->getNumber() . ')<br/>';
+          }
+        }
+        break;
+
+      case 'type':
+        $option .= '<input type="radio" name="click2call-' . $field_name . '-' . $delta . '-phone" value="type" ' . $checked . '/><input type="text" id="click2call-' . $field_name . '-' . $delta . '-type-phone" class="click2call-type"/><br/>';
+        break;
+
+      case 'voipnumber':
+        if (module_exists('voipnumber')) {
+          $numbers = VoipNumber::getNumbersFromUid();
+          //Numbers could be empty, check.
+          if (empty($numbers)) {
+            continue;
+          }
+          $option .= '<input type="radio" name="click2call-' . $field_name . '-' . $delta . '-phone" value="voipnumber" ' . $checked . '/>';
+          $option .= '<select class="click2call-voipnumber" id="click2call-' . $field_name . '-' . $delta . '-select">';
+          foreach ($numbers as $number) {
+            $option .= "<option value='".$number->getNumber()."'> ".$number->getName()." </option>";
+          }
+          $option .= '</select><br/>';
+        }
+        break;
+    }
+  }
+  $output .= '<div class="click2call-' . $field_name . '-' . $delta . '-phone">' . $option . '</div>';
+  return $output;
+}

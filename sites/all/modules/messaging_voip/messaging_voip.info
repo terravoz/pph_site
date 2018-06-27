@@ -1,0 +1,14 @@
+name = Voip Messaging
+description = Sending Method: Voip
+package = "Messaging"
+dependencies[] = messaging
+dependencies[] = voip
+dependencies[] = voipnumber
+core = 6.x
+
+; Information added by drupal.org packaging script on 2011-11-08
+version = "6.x-1.0-beta1"
+core = "6.x"
+project = "messaging_voip"
+datestamp = "1320789035"
+

@@ -1,0 +1,482 @@
+<?php
+/**
+ * Implementation of hook_init().
+ *
+ * Load required includes.
+ */
+ require_once dirname(__FILE__) . '/phonerecorderfield_widget.inc';
+function phonerecorderfield_init() {
+  module_load_include('inc', 'phonerecorderfield', 'sources/phonerecorder');
+ // module_load_include('inc', 'phonerecorderfield', 'phonerecorderfield_widget');
+  module_load_include('inc', 'phonerecorderfield', 'includes/phonerecorderfield.script');
+}
+/**
+ * Implementation of hook_menu().
+ */
+function phonerecorderfield_menu() {
+  
+  $items['admin/settings/phonerecorderfield'] = array(
+    'title' => 'Phone Recorder Field',
+    'description' => 'Configure Phone Recorder Field.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('phonerecorderfield_admin_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  
+  
+   $items['phonerecorderfield/call'] = array(
+        'title' => 'Call',
+        'description' => '',
+        'page callback' => 'phonerecorderfield_call',
+        'type' => MENU_CALLBACK,
+        'access callback' => TRUE,
+   );
+   
+    $items['phonerecorderfield/get/recording'] = array(
+        'title' => 'Get recording',
+        'description' => '',
+        'page callback' => 'phonerecorderfield_get_recording',
+        'type' => MENU_CALLBACK,
+        'access callback' => TRUE,
+   );
+   
+    $items['phonerecorderfield/hangup'] = array(
+        'title' => 'Hangup',
+        'description' => '',
+        'page callback' => 'phonerecorderfield_hangup',
+        'type' => MENU_CALLBACK,
+        'access callback' => TRUE,
+    );
+
+      return $items;
+}
+
+function phonerecorderfield_admin_settings_form(&$form_state) {
+    $form=_phonerecorderfield_settings_form();
+    return system_settings_form($form);
+}
+
+function _phonerecorderfield_settings_form($field=NULL) {
+    $options=array();
+    /*Set stored values, they can come from admin form or from field form*/
+    if ($field) {
+        $phonerecorderfield_number=!empty($field['phonerecorderfield_number']) ? $field['phonerecorderfield_number'] : variable_get('phonerecorderfield_number', array('type'));
+        $phonerecorderfield_script = !empty($field['phonerecorderfield_script']) ? $field['phonerecorderfield_script'] : variable_get('phonerecorderfield_script', 'phonerecorderfield_default');
+        $phonerecorderfield_text = !empty($field['phonerecorderfield_text']) ? $field['phonerecorderfield_text'] : variable_get('phonerecorderfield_text', 'Record audio by having system call you on this number');
+        $phonerecorderfield_format = !empty($field['phonerecorderfield_format']) ? $field['phonerecorderfield_format'] : variable_get('phonerecorderfield_format', 'mp3');
+        $prefix='';
+    }
+    else {
+        $phonerecorderfield_number=variable_get('phonerecorderfield_number', array('type'));
+        $phonerecorderfield_script = variable_get('phonerecorderfield_script', 'phonerecorderfield_default');
+        $phonerecorderfield_text = variable_get('phonerecorderfield_text', 'Record audio by having system call you on this number');
+        $phonerecorderfield_format = variable_get('phonerecorderfield_format', 'mp3');
+        $prefix='<div>' . t('This are global settings, each field can be further adjusted with per field settings.') . '</div>';
+    }
+    if (module_exists('voipnumber')) {
+        //This options are available only if voipnumber is enabled
+        $options['default']=t('Default number (from user profile)');
+        $options['voipnumber']=t('Number returned by Voipnumber field');
+    }
+    else {
+        $description = t('Enable !voipnumber module to get more options.', array('!voipnumber' => l('voipnumber', 'http://drupal.org/project/voipnumber')));
+    }
+    
+    $options['type']=t('Allow user to type in the number');
+    
+    $form['phonerecorderfield_number'] = array(
+      '#type' => 'checkboxes',
+      '#prefix' => $prefix,
+      '#title' => t('Number to be called'),
+      '#options' => $options,
+      '#default_value' => $phonerecorderfield_number,
+      '#description' => $description,
+    );
+    
+    /* Build list of voip scripts */
+    $form['phonerecorderfield_script'] = array(
+      '#type' => 'select',
+      '#title' => t('Default script to be used'),
+      '#options' => VoipScript::getScriptNames(),
+      '#default_value' => $phonerecorderfield_script
+    );
+
+    $form['phonerecorderfield_format'] = array(
+      '#type' => 'select',
+      '#title' => t('Default audio format'),
+      '#options' => array('mp3'=>'mp3', 'wav'=>'wav'),
+      '#default_value' =>array($phonerecorderfield_format=>$phonerecorderfield_format),//$phonerecorderfield_format,
+      '#description' => t('Default audio format to be used for the recordings.'),
+    );
+    
+    $form['phonerecorderfield_text'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Default text'),
+      '#default_value' => $phonerecorderfield_text,
+      '#description' => t('Default text to be displayed on Phone Recorder Field.'),
+    );
+    
+    return $form;
+}
+
+/**
+ * AJAX Callback
+ * Calls the user on his phone using VOIP module
+ */ 
+function phonerecorderfield_call() {
+  global $user;
+
+  if (!user_access('create ' . $_GET['node_type'] . ' content')) {
+    return;
+  }
+  //TODO: What should be the name?
+  $name='Phone Recorder';
+  $number=$_GET['phone']; 
+  $vars = array('uid' => $user->uid, 'name' => $name, 'number' => $number);
+  
+  // load voip script
+  $machine_field_name=str_replace('-', '_', $_GET['field_name']);
+  $script_name=phonerecorderfield_get_widget_setting($machine_field_name, $_GET['node_type'], 'phonerecorderfield_script');
+  $script = VoipScript::loadScript($script_name, $vars);
+
+  $call = new VoipCall();
+  $call->setDestNumber($number);
+  $call->setDestName($user->name);
+  $call->setCallerName('Phone Recorder Field');
+  $call->setScript($script);
+ 
+  $call->save();
+    
+  // Dial the call.
+  voip_dial($call);
+  
+  // Log call with watchdog
+  $type = 'phonerecorderfield';
+  $message = t("New Phone Recorder message recorded by $user->name to phone $number. See voipcall nid " . $call->getCid());
+  watchdog($type, $message);
+  
+  return drupal_json(array('cid' => $call->getCid()));
+  exit();
+}
+
+/**
+ * AJAX Callback function
+ * Returns status(true/false) and url for recording based on call_id.
+ */
+function phonerecorderfield_get_recording() {
+    global $user;
+    $cid=$_GET['cid'];
+	$call = VoipCall::load($cid);
+    //Check for recording only if call is finnished
+    if ($call->isHangup()==TRUE) {
+        if ($call->getCallStatus() != VoipCall::COMPLETED) {
+            $phone_list=theme('phonerecorderfield_phone_numbers', $_GET['field_name'], $_GET['delta'], $_GET['node_type']);
+            if ($call->getCallStatus()== VoipCall::ERROR) {
+                $failed_message='<div class="error">' . $call->getErrorMessage() . '</div>';
+            }
+            elseif ($call->getCallStatus()!='to_hangup') {
+                //We display message for all statuses except hangup
+                $failed_message='<div class="error">' . $call->getCallStatusDescription() . '</div>';
+            }
+            return drupal_json(array('status' => 'failed', 'message' => $failed_message . $phone_list));
+            exit();
+        }
+        #Else:
+        $file=phonerecorderfield_file_load($cid);
+        
+        if ($file) {
+		  $phonerecorder_file = file_create_url($file['filepath']);
+          /* Render audio player */ 
+          $info = pathinfo($file['filename']);
+          $op = $info['extension'];
+          $phonerecorder_file=audiofield_get_player($phonerecorder_file, $op);
+            
+	      //Return json
+          return drupal_json(array('status' => 'success', 'file' => $phonerecorder_file, 'fid' => $file['fid']));
+          exit();
+        }
+		else {
+		  $phone_list=theme('phonerecorderfield_phone_numbers', $_GET['field_name'], $_GET['delta'], $_GET['node_type']);
+		  return drupal_json(array('status' => 'failed', 'message' => '<div class="error">Audio not recorded. Try again.</div>'.$phone_list));
+		  exit();
+		}
+    }
+    else
+        return drupal_json(array('status' => 'calling'));
+    exit();
+}
+
+/**
+ * AJAX Callback function
+ * Hangups the call and returns status (true/false).
+ */
+function phonerecorderfield_hangup() {
+    $cid=$_GET['cid'];
+    $call= VoipCall::load($cid);
+    $status=voip_hangup($call);
+    
+    return drupal_json(array('status' => $status));
+    exit();
+}
+
+/**
+ * Implementation of hook_elements().
+ */
+function phonerecorderfield_elements() {
+  $elements = array();
+  $filefield_elements = filefield_elements();
+  $elements['phonerecorderfield_widget'] = $filefield_elements['filefield_widget'];
+
+  //Process callback to render Nanogong recording applet
+  $elements['phonerecorderfield_widget']['#process'] = array('phonerecorderfield_widget_process');
+  $elements['phonerecorderfield_widget']['#value_callback'] = 'phonerecorderfield_widget_value';
+  return $elements;
+}
+
+/**
+ * Implementation of hook_filefield_sources_widgets().
+ *
+ * This returns a list of widgets that are compatible with FileField Sources.
+ */
+function phonerecorderfield_filefield_sources_widgets() {
+  return array('phonerecorderfield_widget');
+}
+
+/**
+ * Implementation of hook_filefield_sources_info().
+ */
+function phonerecorderfield_filefield_sources_info() {
+  $params = array();
+  $return = array();
+  
+    $function = 'filefield_source_phonerecorder_info';
+    if (function_exists($function)) {
+      $result = call_user_func_array($function, $params);
+      if (isset($result) && is_array($result)) {
+        $return = array_merge_recursive($return, $result);
+      }
+      elseif (isset($result)) {
+        $return[] = $result;
+      }
+    }
+  
+  return $return;
+}
+/**
+ * Implementation of hook_theme().
+ */
+function phonerecorderfield_theme() {
+  $theme= array(
+      'phonerecorderfield_widget' => array(
+      'arguments' => array('element' => NULL),
+      'file' => 'phonerecorderfield_widget.inc',
+      ),
+       'phonerecorderfield_formatter_phonerecorderfield_external_url' => array(
+      'arguments' => array('element' => NULL),
+      'file' => 'phonerecorderfield_formatter.inc',
+      ),
+      'phonerecorderfield_phone_numbers' => array(
+      'arguments' => array('field_name' => NULL, 'delta' => 0, 'node_type' => NULL),
+      ),
+      //Theme for recorder filefield source
+      'filefield_source_phonerecorder_element' => array(
+      'arguments' => array('element' => NULL),
+      'file' => 'sources/phonerecorder.inc',
+      ),
+  );
+
+  return $theme;
+}
+
+/**
+ * Implementation of hook_widget_info().
+ */
+function phonerecorderfield_widget_info() {
+  return array(
+    'phonerecorderfield_widget' => array(
+      'label' => t('Phone Recorder'),
+      'field types' => array('filefield'),
+      'multiple values' => CONTENT_HANDLE_CORE,
+      'callbacks' => array('default value' => CONTENT_CALLBACK_CUSTOM),
+      'description' => t('Calls the user and gets a recording input as audio file.'),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_widget_settings().
+ */
+function phonerecorderfield_widget_settings($op, $widget) {
+  switch ($op) {
+    case 'form':
+      return phonerecorderfield_widget_settings_form($widget);
+    case 'save':
+      return phonerecorderfield_widget_settings_save($widget);
+  }
+}
+
+/**
+ * Implementation of hook_widget().
+ * 
+ * Assign default properties to item and delegate to phonerecorderfield.
+ */
+function phonerecorderfield_widget(&$form, &$form_state, $field, $items, $delta = 0) {
+  // Start with the phonerecorderfield widget as a basic start.
+  // Note that phonerecorderfield needs to modify $form by reference.
+  $element = filefield_widget($form, $form_state, $field, $items, $delta);
+
+  return $element;
+}
+
+
+//==========================================//
+// DEFINING A FORMATTER
+//==========================================//
+
+
+/**
+ * Implementation of hook_field_formatter_info().
+ *   
+ * All fields should have a 'default' formatter.
+ * Any number of other formatters can be defined as well.
+ * It's nice for there always to be a 'plain' option
+ * for the raw value, but that is not required.
+ * 
+ */
+function phonerecorderfield_field_formatter_info() {
+  $formatters = array(
+    'phonerecorderfield_external_url' => array(
+      'label' => t('Audio from external URL'),
+      'field types' => array('filefield'),
+      'description' => t('Displays audio from external URL.'),
+    ),
+  );
+
+  return $formatters;
+}
+
+
+/**
+ * Implementation of CCK's hook_default_value().
+ */
+function phonerecorderfield_default_value(&$form, &$form_state, $field, $delta) {
+  return filefield_default_value($form, $form_state, $field, $delta);
+}
+
+/**
+ * Implementation of hook_form_[form_id]_alter().
+ *
+ * Modify the add new field form to change the default formatter.
+ */
+function phonerecorderfield_form_content_field_overview_form_alter(&$form, &$form_state) {
+  $form['#submit'][] = 'phonerecorderfield_form_content_field_overview_submit';
+}
+
+/**
+ * Submit handler to set a new field's formatter to "audiofield_embedded".
+ */
+function phonerecorderfield_form_content_field_overview_submit(&$form, &$form_state) {
+  if (isset($form_state['fields_added']['_add_new_field']) && isset($form['#type_name'])) {
+    $new_field = $form_state['fields_added']['_add_new_field'];
+    $node_type = $form['#type_name'];
+    $field = content_fields($new_field, $node_type);
+    if ($field['widget']['module'] == 'phonerecorderfield') {
+      foreach ($field['display_settings'] as $display_type => $display_settings) {
+        if ($field['display_settings'][$display_type]['format'] == 'default') {
+          $field['display_settings'][$display_type]['format'] = 'audiofield_embedded';
+        }
+      }
+      content_field_instance_update($field);
+    }
+  }
+}
+
+/*Retrieve and theme phone numbers selection*/
+function theme_phonerecorderfield_phone_numbers($field_name, $delta, $node_type) {
+    global $user;
+    $machine_field_name=str_replace('-', '_', $field_name);
+    $op=phonerecorderfield_get_widget_setting($machine_field_name, $node_type, 'phonerecorderfield_number');
+    
+    foreach ($op as $key => $call_option) {
+        if ($call_option===0) {
+          unset($op[$key]);
+        }
+    }
+    $num=count($op);
+    if ($num==1) {
+      //If only one choice is available then make it selected
+      $checked='checked="checked"';
+    }
+    foreach ($op as $call_option) {
+        
+        switch ($call_option) {
+            case 'default':
+                if (module_exists('voipnumber')) {
+                  $phone = VoipNumber::getDefaultNumberFromUid();
+                    if (empty($phone)) {
+                        if ($num==2) {
+                            //If only 2 choices are available then make the other selected
+                            $checked='checked="checked"';
+                        }
+                    }
+                    else {
+                      $option .= '<input type="radio" name="phonerecorderfield-' . $field_name . '-' . $delta . '-phone" value="' . $phone->getNumber() . '" checked="checked"/>Default(' . $phone->getNumber() . ')<br/>';
+                    }
+                }
+            break;
+            
+            case 'type':
+                $option .= '<input type="radio" name="phonerecorderfield-' . $field_name . '-' . $delta . '-phone" value="type" ' . $checked . '/><input type="text" id="phonerecorderfield-' . $field_name . '-' . $delta . '-type-phone" class="phonerecorderfield-type"/><br/>';
+            break;
+            
+            case 'voipnumber':
+                if (module_exists('voipnumber')) {
+                    $numbers = VoipNumber::getNumbersFromUid();
+                    //Numbers could be empty, check.
+                    if (empty($numbers)) {
+                      continue;
+                    }
+                    $option .= '<input type="radio" name="phonerecorderfield-' . $field_name . '-' . $delta . '-phone" value="voipnumber" ' . $checked . '/>';
+                    $option .= '<select class="phonerecorderfield-voipnumber" id="phonerecorderfield-' . $field_name . '-' . $delta . '-select">';
+                    foreach ($numbers as $number) {
+                        $option .= "<option value='".$number->getNumber()."'> ".$number->getName()." </option>";
+                    }
+                    $option .= '</select><br/>';
+                }
+            break;
+        }
+    }
+        $output=phonerecorderfield_get_widget_setting($machine_field_name, $node_type, 'phonerecorderfield_text');
+        $output .= '<div class="phonerecorderfield-' . $field_name . '-' . $delta .  '-phone">' . $option . '</div>';
+        return $output;
+}
+
+function phonerecorderfield_file_load($cid) {
+    $fid = db_result(db_query("SELECT fid FROM {phonerecorderfield_recording} WHERE call_nid=%d", $cid));
+    $file = db_fetch_array(db_query("SELECT * FROM {files} WHERE fid=%d", $fid));
+    return $file;
+}
+
+function phonerecorderfield_file_load_by_fid($fid) {
+    $phonerecorder_file=db_fetch_array(db_query("SELECT * FROM {phonerecorderfield_recording} WHERE fid=%d", $fid));
+    return $phonerecorder_file;
+}
+
+function phonerecorderfield_get_widget_setting($field_name, $content_type, $setting_name) {
+    $field_settings=content_fields('field_' . $field_name, $content_type);
+    if (isset($field_settings['widget'][$setting_name])) {
+        return $field_settings['widget'][$setting_name];
+    }
+    else {
+        return variable_get($setting_name, '');
+    }
+}
+
+/**
+ * Implementation of hook_voipscript_get_script_names()
+ */
+function phonerecorderfield_voipscript_get_script_names() {
+  $script_names[] = 'phonerecorderfield_default';
+  return $script_names;
+}

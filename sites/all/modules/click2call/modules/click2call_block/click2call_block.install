@@ -1,0 +1,9 @@
+<?php
+// $Id$
+/**
+ * Implementation of hook_uninstall().
+ */
+function click2call_block_uninstall() {
+  //Delete module variables
+  db_query("DELETE FROM {variable} WHERE name LIKE '%click2call_block%'");
+}

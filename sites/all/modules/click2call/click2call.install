@@ -1,0 +1,15 @@
+<?php
+// $Id$
+/**
+ * Implementation of hook_install().
+ */
+function click2call_install() {
+  drupal_load('module', 'content');
+  content_notify('install', 'click2call');
+}
+
+function click2call_uninstall() {
+  drupal_load('module', 'content');
+  content_notify('uninstall', 'click2call');
+  variable_del('click2call_number');
+}

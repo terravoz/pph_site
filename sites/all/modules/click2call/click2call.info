@@ -1,0 +1,15 @@
+; $Id$
+name = Click2Call
+description = Provides a common API for Click2Call modules
+dependencies[] = voip
+dependencies[] = voipcall
+dependencies[] = content
+package = Click2Call
+core = 6.x
+
+; Information added by drupal.org packaging script on 2011-08-18
+version = "6.x-1.0-beta3"
+core = "6.x"
+project = "click2call"
+datestamp = "1313665616"
+

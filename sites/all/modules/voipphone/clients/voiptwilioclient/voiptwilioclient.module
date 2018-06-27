@@ -1,0 +1,204 @@
+<?php 
+
+/**
+ * Implementation of hook_voipphone_clients().
+ */
+function voiptwilioclient_voipphone_clients() {
+  $clients['Twilio']=array(
+		'name' => 'VoIP Twilio Client',
+        'config' => 'voip-client/twilio',
+        'callback' => 'voiptwilioclient_callback',
+  );
+  
+  return $clients;
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function voiptwilioclient_menu() {
+  $items['voip-client/twilio'] = array(
+    'title' => 'VoIP Twilio settings',
+    'description' => 'VoIP Twilio settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('voiptwilioclient_admin_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  
+  $items['voip/twilioclient/callhandler'] = array(
+    'title' => 'VoIP Twilio Client call handler',
+    'description' => 'Generates TwiML for Twilio client.',
+    'access callback' => TRUE, 
+    'page callback' => 'voiptwilioclient_call_handler',
+    'type' => MENU_CALLBACK,
+  );
+  
+  return $items;
+}
+
+function voiptwilioclient_admin_settings_form(&$form_state) {
+  $form['voipphone_twilio_account_sid'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Twilio Account SID'),
+    '#description' => t("The account SID provided in your Twilio account dashboard."),
+    '#default_value' => variable_get('voipphone_twilio_account_sid', ''),
+    '#required' => TRUE,
+  );
+
+  $form['voipphone_twilio_auth_token'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Twilio Auth Token'),
+    '#description' => t("The authorization token provided in your Twilio account dashboard."),
+    '#default_value' => variable_get('voipphone_twilio_auth_token', ''),
+    '#required' => TRUE,
+  );
+  
+  $form['voipphone_twilio_app_sid'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Twilio Application SID'),
+    '#description' => t("The application SID of your Twilio application ").l('(https://www.twilio.com/user/account/apps)','https://www.twilio.com/user/account/apps'),
+    '#default_value' => variable_get('voipphone_twilio_app_sid', ''),
+    '#required' => TRUE,
+  );
+  
+  $form['voipphone_twilio_callerid'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Caller id number'),
+    '#description' => t("Caller id number to be used in VoIP Drupal calls."),
+    '#default_value' => variable_get('voipphone_twilio_callerid', ''),
+    '#required' => TRUE,
+  );
+    
+  return system_settings_form($form);
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function voiptwilioclient_theme() {
+  return array(
+    'voiptwilioclient_nodialpad' => array(
+      'arguments' => array('id' => '', 'number' => NULL, 'button_text' => NULL),
+    ),
+    'voiptwilioclient_withdialpad' => array(
+      'arguments' => array('id' => '', 'number' => NULL, 'button_text' => NULL),
+    ),
+  );
+}
+
+function voiptwilioclient_callback($skin, $id, $dial_number, $button_text=NULL) {
+  if($skin) {
+    return theme('voiptwilioclient_withdialpad', $id, $dial_number, $button_text);
+  }
+  else {
+    return theme('voiptwilioclient_nodialpad', $id, $dial_number, $button_text);
+  }
+}
+
+function voiptwilioclient_add_js() {
+  drupal_set_html_head('<script type="text/javascript" src="http://static.twilio.com/libs/twiliojs/1.0/twilio.js"></script>');
+  drupal_add_css(drupal_get_path('module', 'voipphone') .'/css/jquery-ui.css');
+  drupal_add_js(drupal_get_path('module', 'voipphone') .'/js/jquery-1.5.1.min.js');
+  drupal_add_js(drupal_get_path('module', 'voiptwilioclient') .'/js/jquery.callme.js');
+  drupal_add_js(drupal_get_path('module', 'voipphone') .'/js/jquery-noconflict.js');
+}
+
+function voiptwilioclient_get_token() {
+  module_load_include('php', 'voiptwilioclient', 'Services/Twilio/Capability');
+  $accountSid = variable_get('voipphone_twilio_account_sid', '');
+  $authToken = variable_get('voipphone_twilio_auth_token', '');
+  $appSid = variable_get('voipphone_twilio_app_sid', '');
+  $capability = new Services_Twilio_Capability($accountSid, $authToken);
+  $capability->allowClientOutgoing($appSid);
+  $token = $capability->generateToken();
+  return $token;
+}
+
+function theme_voiptwilioclient_nodialpad($id, $number, $button_text=NULL) {
+  if (!$button_text) {
+    $button_text = $number;
+  }
+  $accountSid = variable_get('voipphone_twilio_account_sid', '');
+  $authToken = variable_get('voipphone_twilio_auth_token', '');
+  if(!$accountSid || !$authToken) {
+    return t('You must set Twilio Account SID and Authentication token before you can start using this module.');
+  }
+  /*$output = '<button class="call" onclick="voiptwilioclient_call('.$number.');">Call
+    </button>
+
+    <button class="hangup" onclick="voiptwilioclient_hangup();">
+      Hangup
+    </button>
+
+    <div class="voiptwilio-log">Loading pigeons...</div>';*/
+    
+    
+  voiptwilioclient_add_js();
+  $token = voiptwilioclient_get_token();
+  $output = '<div id="voiptwilioclient-'.$id.'"></div>';   
+  $output.= ' 
+   <script type="text/javascript">
+    jQuery15("#voiptwilioclient-'.$id.'")
+    .css("width","210px")
+    .callme({
+      token: "'.$token.'",
+      numberToDial: "'.$number.'",
+      buttonTextReady: "'.$button_text.'",
+      slideOpen: false,
+      dialPad: false,
+    })
+    </script>
+  ';
+  return $output;
+}
+
+function theme_voiptwilioclient_withdialpad($id, $number, $button_text=NULL) {
+  if (!$button_text) {
+    $button_text = $number;
+  }
+  $accountSid = variable_get('voipphone_twilio_account_sid', '');
+  $authToken = variable_get('voipphone_twilio_auth_token', '');
+  if(!$accountSid || !$authToken) {
+    return t('You must set Twilio Account SID and Authentication token before you can start using this module.');
+  }
+  voiptwilioclient_add_js();
+  $token = voiptwilioclient_get_token();
+  $output = '<div id="voiptwilioclient-'.$id.'"></div>';   
+  $output.= ' 
+   <script type="text/javascript">
+    jQuery15("#voiptwilioclient-'.$id.'")
+    .css("width","210px")
+    .callme({
+      token: "'.$token.'",
+      numberToDial: "'.$number.'",
+      buttonTextReady: "'.$button_text.'",
+      slideOpen: true,
+      dialPad: true,
+    })
+    </script>
+  ';
+  return $output;
+}
+
+function voiptwilioclient_call_handler() { 
+  header('Content-type: text/xml');
+  $caller_id = variable_get('voipphone_twilio_callerid','');
+  //$number = "jenny";
+  if (isset($_REQUEST['PhoneNumber'])) {
+    $number = htmlspecialchars($_REQUEST['PhoneNumber']);
+  }
+  if (preg_match("/^[\d\+\-\(\) ]+$/", $number)) {
+    $numberOrClient = "<Number>" . $number . "</Number>";
+  } 
+  else {
+    $numberOrClient = "<Client>" . $number . "</Client>";
+  }
+  print '
+<Response>
+<Dial callerId="'.$caller_id.'">
+'.$numberOrClient.'
+</Dial>
+</Response>';
+die();
+}

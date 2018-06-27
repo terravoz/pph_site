@@ -1,0 +1,17 @@
+; $Id: 
+name = Phone Recorder Field
+description = Adds Phone Recorder Field which calls the user and gets a recording input as audio file.
+core = 6.x
+dependencies[] = audiofield
+dependencies[] = voip
+dependencies[] = voipcall
+package = CCK
+
+
+
+; Information added by drupal.org packaging script on 2011-11-08
+version = "6.x-1.0-beta4"
+core = "6.x"
+project = "phonerecorderfield"
+datestamp = "1320788436"
+
